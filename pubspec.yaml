@@ -1,0 +1,58 @@
+name: my_app
+description: "A new Flutter project."
+
+publish_to: "none"
+
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.7.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  firebase_core: ^3.13.0
+  firebase_auth: ^5.5.3
+  cupertino_icons: ^1.0.8
+  local_auth: ^2.3.0
+  url_launcher: ^6.2.5
+  image_picker: ^1.0.7
+  speech_to_text: ^7.0.0
+  flutter_sound: ^9.2.13
+  path_provider: ^2.0.11
+  permission_handler: ^11.3.1
+  google_mlkit_text_recognition: ^0.15.0
+  intl: ^0.20.2
+  google_fonts: ^6.2.1
+  flutter_launcher_icons: ^0.13.1
+  google_sign_in: ^6.3.0
+  cloud_firestore: ^5.0.0 
+  sign_in_with_apple: ^6.1.1
+  crypto: ^3.0.3
+  firebase_storage: ^12.4.6
+  fl_chart: ^1.0.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "image-removebg-preview.png"
+
+flutter:
+  uses-material-design: true
+  assets:
+    - pic/icons8-profile-picture-50.png
+    - image-removebg-preview.png
+    - 6029521.jpg
+    # Add your custom logo if needed, e.g.:
+    # - assets/cashly_logo.png
+  # fonts:
+  #   - family: CustomFont
+  #     fonts:
+  #       - asset: assets/fonts/CustomFont-Regular.ttf
+  #       - asset: assets/fonts/CustomFont-Bold.ttf
+  #         weight: 700
