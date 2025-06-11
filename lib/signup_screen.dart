@@ -4,7 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart'; // Import Firebase Auth
 import 'package:cloud_firestore/cloud_firestore.dart'; // <<< ADD THIS IMPORT for Firestore
 
-import 'create_pin_screen.dart'; // Your PIN creation screen
+import 'login_page.dart'; // Import your login page
+import 'choice_security_screen.dart'; // Import your choice security screen
+ // Your PIN creation screen
 
 class SignupPage extends StatefulWidget {
   const SignupPage({super.key});
@@ -86,12 +88,12 @@ class _SignupPageState extends State<SignupPage> {
         }
         // --- END: ADD FIRESTORE DOCUMENT CREATION HERE ---
 
-        _showSnackBar("Sign up successful! Please set your PIN.");
+        _showSnackBar("Sign up successful! ");
 
         // Navigate to CreatePinScreen after successful sign-up AND document creation
         Navigator.pushReplacement(
           context,
-          MaterialPageRoute(builder: (_) => const CreatePinScreen()),
+          MaterialPageRoute(builder: (_) => const ChoiceSecurityScreen()),
         );
       }
     } on FirebaseAuthException catch (e) {
@@ -244,7 +246,7 @@ class _SignupPageState extends State<SignupPage> {
                     child: _isLoading
                         ? const CircularProgressIndicator(color: Colors.white) // Show loading spinner
                         : const Text(
-                            "NEXT",
+                            "SIGNUP",
                             style: TextStyle(
                               fontSize: 16,
                               color: Color.fromARGB(188, 255, 255, 255),
@@ -260,7 +262,7 @@ class _SignupPageState extends State<SignupPage> {
                 child: TextButton(
                   onPressed: () {
                     // Navigate to Login Page
-                    // Navigator.push(context, MaterialPageRoute(builder: (_) => LoginPage()));
+                    Navigator.push(context, MaterialPageRoute(builder: (_) => const LoginPage()));
 
                   },
                   child: const Text(

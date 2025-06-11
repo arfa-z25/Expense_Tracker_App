@@ -3,12 +3,13 @@
 
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:google_sign_in/google_sign_in.dart'; // Add for Google Sign-In
-// import 'package:sign_in_with_apple/sign_in_with_apple.dart'; // REMOVED: Apple Sign-In
+import 'package:google_sign_in/google_sign_in.dart';
+import 'package:cloud_firestore/cloud_firestore.dart'; // Import Firestore
 
 import 'home_page.dart'; // Import your home page
 import 'signup_screen.dart'; // Import your signup page
-// import 'forgot_password_page.dart'; // Uncomment if you create a forgot password page
+import 'pin_security_page.dart'; // NEW: Import your PIN security page
+import 'biometric_security_page.dart'; // NEW: Import your Biometric security page
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -22,10 +23,11 @@ class _LoginPageState extends State<LoginPage> {
   final TextEditingController _passwordController = TextEditingController();
 
   bool _isObscurePassword = true;
-  bool _isLoading = false; // To show loading indicator
+  bool _isLoading = false;
 
-  final FirebaseAuth _auth = FirebaseAuth.instance; // Firebase Auth instance
-  final GoogleSignIn _googleSignIn = GoogleSignIn(); // Google Sign-In instance
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+  final GoogleSignIn _googleSignIn = GoogleSignIn();
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance; // Firestore instance
 
   @override
   void dispose() {
@@ -59,7 +61,8 @@ class _LoginPageState extends State<LoginPage> {
 
       if (userCredential.user != null) {
         _showSnackBar("Login successful!");
-        _navigateToHomePage();
+        // Call the new method to handle post-login security check
+        _handlePostLoginSecurityCheck(userCredential.user!);
       }
     } on FirebaseAuthException catch (e) {
       String message;
@@ -93,7 +96,6 @@ class _LoginPageState extends State<LoginPage> {
     try {
       final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
       if (googleUser == null) {
-        // The user canceled the sign-in
         _showSnackBar("Google Sign-In cancelled.");
         setState(() { _isLoading = false; });
         return;
@@ -109,7 +111,8 @@ class _LoginPageState extends State<LoginPage> {
 
       if (userCredential.user != null) {
         _showSnackBar("Google login successful!");
-        _navigateToHomePage();
+        // Call the new method to handle post-login security check
+        _handlePostLoginSecurityCheck(userCredential.user!);
       }
     } on FirebaseAuthException catch (e) {
       _showSnackBar("Google login failed: ${e.message}");
@@ -122,12 +125,46 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
+  // --- NEW: Handle Post-Login Security Check ---
+  Future<void> _handlePostLoginSecurityCheck(User user) async {
+    try {
+      DocumentSnapshot userDoc = await _firestore.collection('users').doc(user.uid).get();
+
+      if (userDoc.exists) {
+        String? securityChoice = userDoc['securityChoice'] as String?;
+
+        if (securityChoice == 'pin') {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (context) => const PinSecurityPage()),
+          );
+        } else if (securityChoice == 'biometric') {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (context) => const BiometricSecurityPage()),
+          );
+        } else {
+          // If 'skip', 'null', or any other value, navigate directly to HomePage
+          _navigateToHomePage();
+        }
+      } else {
+        // User document doesn't exist, maybe it's a new user or an error.
+        // For now, navigate to home directly, but you might want to handle this differently.
+        _showSnackBar("User profile not found. Navigating to home.");
+        _navigateToHomePage();
+      }
+    } catch (e) {
+      _showSnackBar("Error checking security preference: $e");
+      _navigateToHomePage(); // Fallback to home if there's an error
+    }
+  }
+
   // --- Helper to navigate to Home Page ---
   void _navigateToHomePage() {
     Navigator.pushAndRemoveUntil(
       context,
       MaterialPageRoute(builder: (context) => const HomePage()),
-      (Route<dynamic> route) => false, // This ensures all previous routes are popped
+      (Route<dynamic> route) => false,
     );
   }
 
@@ -143,7 +180,7 @@ class _LoginPageState extends State<LoginPage> {
             children: [
               const SizedBox(height: 40),
               Center(
-                child: Image.asset('assets/image-removebg-preview.png', height: 30), // replace with your logo path
+                child: Image.asset('image-removebg-preview.png', height: 30), // replace with your logo path
               ),
               const SizedBox(height: 10),
               const Text(
@@ -216,7 +253,7 @@ class _LoginPageState extends State<LoginPage> {
                 child: SizedBox(
                   width: 400,
                   child: ElevatedButton(
-                    onPressed: _isLoading ? null : _signInWithEmailPassword, // Disable button while loading
+                    onPressed: _isLoading ? null : _signInWithEmailPassword,
                     style: ElevatedButton.styleFrom(
                       backgroundColor:const Color(0xFF89732B),
                       padding: const EdgeInsets.symmetric(vertical: 16),
@@ -225,14 +262,14 @@ class _LoginPageState extends State<LoginPage> {
                       ),
                     ),
                     child: _isLoading
-                        ? const CircularProgressIndicator(color: Colors.white) // Show loading spinner
+                        ? const CircularProgressIndicator(color: Colors.white)
                         : const Text(
-                            "Log In",
-                            style: TextStyle(
-                              fontSize: 16,
-                              color: Color.fromARGB(255, 225, 222, 213),
+                              "Log In",
+                              style: TextStyle(
+                                fontSize: 16,
+                                color: Color.fromARGB(255, 225, 222, 213),
+                              ),
                             ),
-                          ),
                   ),
                 ),
               ),
@@ -253,10 +290,10 @@ class _LoginPageState extends State<LoginPage> {
                 children: [
                   // Google Sign-In Button
                   SizedBox(
-                    width: 140, // Adjust width as needed
+                    width: 140,
                     child: ElevatedButton.icon(
                       onPressed: _isLoading ? null : _signInWithGoogle,
-                      icon: const Icon(Icons.g_mobiledata, size: 28), // Use Google's icon
+                      icon: const Icon(Icons.g_mobiledata, size: 28),
                       label: const Text("Google"),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color.fromARGB(255, 0, 0, 0),
@@ -265,15 +302,12 @@ class _LoginPageState extends State<LoginPage> {
                       ),
                     ),
                   ),
-                  // REMOVED: Apple Sign-In Button
-                  // const SizedBox(width: 16), // Adjust spacing if only one social button is left
                 ],
               ),
               const SizedBox(height: 24),
               Center(
                 child: TextButton(
                   onPressed: () {
-                    // Navigate to Signup Page
                     Navigator.push(
                       context,
                       MaterialPageRoute(builder: (context) => const SignupPage()),

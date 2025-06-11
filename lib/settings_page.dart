@@ -1,11 +1,12 @@
-// lib/settings_page.dart
-import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart'; // For logout
-import 'package:cloud_firestore/cloud_firestore.dart'; // For user settings
-import 'package:local_auth/local_auth.dart'; // For biometric settings
+// ignore_for_file: use_build_context_synchronously
 
-// Import your login page if you want to navigate there on logout
-// import 'login_page.dart';
+import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:local_auth/local_auth.dart';
+
+// Import your PIN screen here. Make sure CreatePinScreen exists!
+import 'create_pin_screen.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -21,14 +22,27 @@ class _SettingsPageState extends State<SettingsPage> {
 
   bool _notificationsEnabled = true;
   bool _biometricsEnabled = false;
+  bool _isPinSet = false;
   String _selectedCurrency = 'PKR';
-  final List<String> _currencies = ['PKR', 'USD', 'EUR', 'GBP']; // Example currencies
+  final List<String> _currencies = ['PKR', 'USD', 'EUR', 'GBP'];
+
+  bool _canCheckBiometrics = false;
+  bool _loading = true;
 
   @override
   void initState() {
     super.initState();
-    _loadUserSettings();
-    _checkBiometricsAvailability();
+    _initializeSettings();
+  }
+
+  Future<void> _initializeSettings() async {
+    await _checkBiometricsAvailability();
+    await _loadUserSettings();
+    if (mounted) {
+      setState(() {
+        _loading = false;
+      });
+    }
   }
 
   Future<void> _loadUserSettings() async {
@@ -39,7 +53,8 @@ class _SettingsPageState extends State<SettingsPage> {
         Map<String, dynamic> userData = userDoc.data() as Map<String, dynamic>;
         setState(() {
           _notificationsEnabled = userData['settings']?['notificationsEnabled'] ?? true;
-          _biometricsEnabled = userData['biometricsEnabled'] ?? false; // Top level field
+          _biometricsEnabled = userData['biometricsEnabled'] ?? false;
+          _isPinSet = userData['userPinHash'] != null && userData['userPinHash'].toString().isNotEmpty;
           _selectedCurrency = userData['settings']?['currency'] ?? 'PKR';
         });
       }
@@ -52,12 +67,11 @@ class _SettingsPageState extends State<SettingsPage> {
       try {
         if (key == 'biometricsEnabled') {
           await _firestore.collection('users').doc(user.uid).update({
-            key: value, // Biometrics is a top-level field
+            key: value,
           });
         } else {
-          // For nested settings
           await _firestore.collection('users').doc(user.uid).update({
-            'settings.$key': value, // Using dot notation for nested fields
+            'settings.$key': value,
           });
         }
         _showSnackBar('$key updated successfully!');
@@ -69,25 +83,31 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Future<void> _checkBiometricsAvailability() async {
-    bool canCheckBiometrics = await _localAuth.canCheckBiometrics;
-    List<BiometricType> availableBiometrics = [];
-    if (canCheckBiometrics) {
-      availableBiometrics = await _localAuth.getAvailableBiometrics();
-    }
-    if (!canCheckBiometrics || availableBiometrics.isEmpty) {
-      // If biometrics not available or not enrolled, disable biometrics option
-      if (mounted) {
-        setState(() {
-          _biometricsEnabled = false; // Force disable if not supported
-        });
+    try {
+      bool canCheck = await _localAuth.canCheckBiometrics;
+      List<BiometricType> availableBiometrics = [];
+      if (canCheck) {
+        availableBiometrics = await _localAuth.getAvailableBiometrics();
       }
-      _updateSetting('biometricsEnabled', false); // Update Firestore
+      setState(() {
+        _canCheckBiometrics = canCheck && availableBiometrics.isNotEmpty;
+        if (!_canCheckBiometrics) {
+          _biometricsEnabled = false;
+        }
+      });
+      if (!_canCheckBiometrics) {
+        await _updateSetting('biometricsEnabled', false);
+      }
+    } catch (e) {
+      setState(() {
+        _canCheckBiometrics = false;
+        _biometricsEnabled = false;
+      });
     }
   }
 
   Future<void> _toggleBiometrics(bool newValue) async {
     if (newValue) {
-      // Try to authenticate
       try {
         bool authenticated = await _localAuth.authenticate(
           localizedReason: 'Enable biometrics for quick login',
@@ -99,48 +119,51 @@ class _SettingsPageState extends State<SettingsPage> {
         );
         if (authenticated) {
           setState(() {
-            _biometricsEnabled = newValue;
+            _biometricsEnabled = true;
           });
-          await _updateSetting('biometricsEnabled', newValue);
+          await _updateSetting('biometricsEnabled', true);
         } else {
-          _showSnackBar('Biometric authentication failed.');
+          _showSnackBar('Biometric authentication failed or cancelled.');
         }
       } catch (e) {
         debugPrint('Biometric authentication error: $e');
         _showSnackBar('Biometric setup failed: $e');
       }
     } else {
-      // Simply disable if toggle is off
       setState(() {
-        _biometricsEnabled = newValue;
+        _biometricsEnabled = false;
       });
-      await _updateSetting('biometricsEnabled', newValue);
+      await _updateSetting('biometricsEnabled', false);
     }
   }
 
   Future<void> _logout() async {
     await _auth.signOut();
     _showSnackBar('Logged out successfully!');
-    // Navigate to Login Page or Splash Screen
-    // Navigator.pushAndRemoveUntil(
-    //   context,
-    //   MaterialPageRoute(builder: (_) => const LoginPage()), // Replace LoginPage
-    //   (Route<dynamic> route) => false,
-    // );
-    // For now, just pop to ensure state is clear
-    Navigator.of(context).pop();
+    if (mounted) {
+      Navigator.of(context).pop();
+    }
   }
 
   void _showSnackBar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message)),
+      );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     const appPrimaryColor = Color(0xFF89732B);
     const appBackgroundColor = Color(0xFFB7C196);
+
+    if (_loading) {
+      return const Scaffold(
+        backgroundColor: appBackgroundColor,
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
 
     return Scaffold(
       backgroundColor: appBackgroundColor,
@@ -182,12 +205,34 @@ class _SettingsPageState extends State<SettingsPage> {
                       title: const Text('Enable Biometric Login'),
                       trailing: Switch(
                         value: _biometricsEnabled,
-                        onChanged: _toggleBiometrics, // Uses biometric authentication
+                        onChanged: _canCheckBiometrics ? _toggleBiometrics : null,
                         activeColor: appPrimaryColor,
                       ),
-                      subtitle: !_biometricsEnabled && !(_localAuth.canCheckBiometrics as bool)
-                          ? const Text('Biometrics not available on this device', style: TextStyle(color: Colors.red))
+                      subtitle: !_canCheckBiometrics
+                          ? const Text('Biometrics not available or not configured on this device', style: TextStyle(color: Colors.red))
                           : null,
+                    ),
+                    const Divider(),
+                    // PIN Password Setting
+                    ListTile(
+                      leading: const Icon(Icons.lock, color: appPrimaryColor),
+                      title: Text(_isPinSet ? 'Change PIN Password' : 'Set PIN Password'),
+                      trailing: const Icon(Icons.arrow_forward_ios, color: appPrimaryColor, size: 18),
+                      onTap: () async {
+                        // Yahan par sirf CreatePinScreen() use karein agar aapko isPinSet ka status bhejna nahi hai
+                        final result = await Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const CreatePinScreen(),
+                          ),
+                        );
+                        if (result == true) {
+                          _loadUserSettings();
+                          _showSnackBar('PIN set or changed successfully!');
+                        } else if (result == false) {
+                          _showSnackBar('PIN operation cancelled.');
+                        }
+                      },
                     ),
                     const Divider(),
                     ListTile(
@@ -213,6 +258,20 @@ class _SettingsPageState extends State<SettingsPage> {
                     ),
                   ],
                 ),
+              ),
+            ),
+            Card(
+              color: Colors.white,
+              elevation: 2,
+              margin: const EdgeInsets.only(bottom: 16),
+              child: ListTile(
+                leading: const Icon(Icons.account_balance, color: appPrimaryColor),
+                title: const Text('Bank Attachment'),
+                trailing: const Icon(Icons.arrow_forward_ios, color: appPrimaryColor, size: 18),
+                onTap: () {
+                  _showSnackBar('Bank attachment feature coming soon!');
+                  // Navigator.push(context, MaterialPageRoute(builder: (context) => BankAttachmentPage()));
+                },
               ),
             ),
             Card(

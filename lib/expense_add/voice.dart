@@ -1,8 +1,11 @@
-// ignore_for_file: use_build_context_synchronously
+// ignore_for_file: use_build_context_synchronously, deprecated_member_use
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 import 'package:speech_to_text/speech_recognition_result.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class VoiceAddPage extends StatefulWidget {
   const VoiceAddPage({super.key});
@@ -12,36 +15,36 @@ class VoiceAddPage extends StatefulWidget {
 }
 
 class _VoiceAddPageState extends State<VoiceAddPage> with WidgetsBindingObserver {
-  // Speech-to-Text variables
   final SpeechToText _speechToText = SpeechToText();
-  bool _speechEnabled = false; // Is speech recognition available?
-  bool _isListening = false; // Is the app currently listening?
-  String _lastWords = ''; // Stores the real-time spoken text
-  String? _deviceLocaleId; // Stores the device's system locale for speech recognition
+  bool _speechEnabled = false;
+  bool _isListening = false;
+  String _lastWords = '';
+  String? _deviceLocaleId;
 
-  // Expense data controllers
   final TextEditingController _dateController = TextEditingController();
   final TextEditingController _amountController = TextEditingController();
-  final TextEditingController _descriptionController = TextEditingController();
+  final TextEditingController _titleController = TextEditingController();
+
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   @override
   void initState() {
     super.initState();
     _initSpeech();
-    WidgetsBinding.instance.addObserver(this); // Observe app lifecycle
+    WidgetsBinding.instance.addObserver(this);
   }
 
   @override
   void dispose() {
-    _speechToText.stop(); // Stop listening if active
+    _speechToText.stop();
     _dateController.dispose();
     _amountController.dispose();
-    _descriptionController.dispose();
-    WidgetsBinding.instance.removeObserver(this); // Remove observer
+    _titleController.dispose();
+    WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
 
-  // Handle app lifecycle changes (pause listening if app goes to background)
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.paused && _isListening) {
@@ -50,20 +53,15 @@ class _VoiceAddPageState extends State<VoiceAddPage> with WidgetsBindingObserver
         _isListening = false;
       });
     }
-    // No need to restart on resume, user will initiate
     super.didChangeAppLifecycleState(state);
   }
 
-  /// Initializes the speech_to_text plugin.
   void _initSpeech() async {
-    // Get the system locale to use for speech recognition
     final systemLocale = await _speechToText.systemLocale();
-    _deviceLocaleId = systemLocale?.localeId ?? 'en_US'; // Fallback to en_US
+    _deviceLocaleId = systemLocale?.localeId ?? 'en_US';
 
-    
     _speechEnabled = await _speechToText.initialize(
       onError: (error) {
-       
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text('Speech recognition error: ${error.errorMsg}')),
@@ -74,7 +72,6 @@ class _VoiceAddPageState extends State<VoiceAddPage> with WidgetsBindingObserver
         });
       },
       onStatus: (status) {
-        
         if (status == SpeechToText.listeningStatus) {
           setState(() {
             _isListening = true;
@@ -83,101 +80,97 @@ class _VoiceAddPageState extends State<VoiceAddPage> with WidgetsBindingObserver
           setState(() {
             _isListening = false;
           });
-          // Process the final text after listening stops automatically
-          if (_lastWords.isNotEmpty) {
-         
-            _processVoiceInput(_lastWords);
-          }
         }
       },
     );
 
-   
     if (mounted) {
-      setState(() {
-       
-      }); // Update UI after initialization
+      setState(() {});
     }
 
     if (!_speechEnabled && mounted) {
-
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Speech recognition not available or permissions denied.')),
+        const SnackBar(content: Text('Speech recognition not available or permissions denied. Please grant microphone permission.')),
       );
     }
   }
 
-  /// Starts a speech recognition session
   void _startListening() async {
     if (!_speechEnabled) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Speech recognition not available. Please check permissions.')),
+        const SnackBar(content: Text('Speech recognition not available. Please check microphone permissions.')),
       );
       return;
     }
 
-    _lastWords = ''; // Clear previous voice input text
+    _lastWords = '';
     _dateController.clear();
     _amountController.clear();
-    _descriptionController.clear();
-    setState(() {}); // Clear UI immediately
+    _titleController.clear();
+    setState(() {});
+
+    _showVoiceInputDialog();
 
     await _speechToText.listen(
       onResult: _onSpeechResult,
-      listenFor: const Duration(seconds: 30), // Listen for up to 30 seconds
-      pauseFor: const Duration(seconds: 3), // Pause detection after 3 seconds of silence
-      localeId: _deviceLocaleId ?? 'en_US', // Use the determined device locale
+      listenFor: const Duration(seconds: 30),
+      pauseFor: const Duration(seconds: 3),
+      localeId: _deviceLocaleId ?? 'en_US',
     );
 
     setState(() {
       _isListening = true;
     });
-
-    _showVoiceInputDialog();
   }
 
-  /// Manually stops the active speech recognition session
   void _stopListening() async {
     await _speechToText.stop();
     setState(() {
       _isListening = false;
     });
 
-    // Ensure the dialog is dismissed if it's still open
-    if (mounted && Navigator.of(context).canPop()) {
+    // Only dismiss the dialog if it is open (not the page itself)
+    if (mounted && ModalRoute.of(context)?.isCurrent == false) {
       Navigator.of(context).pop();
+    }
+
+    if (_lastWords.isNotEmpty) {
+      _processVoiceInput(_lastWords);
     }
   }
 
-  /// Callback when SpeechToText plugin returns a result.
   void _onSpeechResult(SpeechRecognitionResult result) {
     setState(() {
       _lastWords = result.recognizedWords;
+      if (result.finalResult) {
+        _stopListening();
+      }
     });
-
-    // If it's the final result, process it immediately
-    if (result.finalResult) {
-    
-      _stopListening(); // Stop listening and trigger processing
-    }
   }
 
-  /// Shows a dialog to provide real-time feedback during voice input.
   void _showVoiceInputDialog() {
     showDialog(
       context: context,
-      barrierDismissible: false, // Don't allow dismissing by tapping outside
+      barrierDismissible: false,
       builder: (BuildContext dialogContext) {
         return StatefulBuilder(
           builder: (context, setDialogState) {
+            _isListening;
+            _lastWords;
             return AlertDialog(
               title: const Text('Speak Your Expense'),
               content: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  Icon(
+                    _isListening ? Icons.mic : Icons.mic_none,
+                    size: 60,
+                    color: _isListening ? Colors.blueAccent : Colors.grey,
+                  ),
+                  const SizedBox(height: 10),
                   Text(
                     _isListening ? 'Listening...' : 'Processing...',
-                    style: const TextStyle(fontWeight: FontWeight.bold),
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
                   ),
                   const SizedBox(height: 10),
                   Text(
@@ -185,11 +178,12 @@ class _VoiceAddPageState extends State<VoiceAddPage> with WidgetsBindingObserver
                         ? 'Say something like: "I spent 500 rupees on groceries yesterday"'
                         : _lastWords,
                     textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 16, color: _lastWords.isEmpty ? Colors.grey : Colors.black),
                   ),
                   const SizedBox(height: 20),
                   ElevatedButton.icon(
                     onPressed: _stopListening,
-                    icon: Icon(_isListening ? Icons.mic_off : Icons.check),
+                    icon: Icon(_isListening ? Icons.stop : Icons.check),
                     label: Text(_isListening ? 'Stop Listening' : 'Done'),
                   ),
                 ],
@@ -201,145 +195,209 @@ class _VoiceAddPageState extends State<VoiceAddPage> with WidgetsBindingObserver
     );
   }
 
-  /// Parses the recognized voice text to extract amount, date, and description.
   void _processVoiceInput(String voiceText) {
-   
-
     String lowerCaseText = voiceText.toLowerCase();
     double? parsedAmount;
+    DateTime? parsedDate;
+    String? parsedTitle;
 
-    // --- AMOUNT PARSING DEBUGGING ---
-    RegExp amountRegex = RegExp(r'(?:rupees|rs|\$|€|£)\s*(\d+(?:[\.,]\d{2})?)|\b(\d+(?:[\.,]\d{2})?)\s*(?:rupees|rs|\$|€|£)?');
-    Iterable<RegExpMatch> amountMatches = amountRegex.allMatches(lowerCaseText);
+    // --- 1. AMOUNT PARSING ---
+    RegExp amountRegex = RegExp(
+      r'(?:total|amount|cost|price|value|spent|paid)\s*[:\s]*[\$€£Rs]*\s*(\d{1,3}(?:[,\s]\d{3})*(?:[\.,]\d{2})?)'
+      r'|\b(\d{1,3}(?:[,\s]\d{3})*(?:[\.,]\d{2})?)\s*(?:rupees|rs|\$|€|£)\b'
+      r'|\b(?:rupees|rs|\$|€|£)\s*(\d{1,3}(?:[,\s]\d{3})*(?:[\.,]\d{2})?)'
+      r'|\b(\d+)\b',
+      caseSensitive: false,
+    );
 
-   
-    bool amountFound = false;
-    for (var match in amountMatches.toList().reversed) {
-      String? amountString = match.group(1) ?? match.group(2);
-     
+    for (var match in amountRegex.allMatches(lowerCaseText)) {
+      String? amountString;
+      if (match.group(1) != null) {
+        amountString = match.group(1);
+      } else if (match.group(2) != null) {
+        amountString = match.group(2);
+      } else if (match.group(3) != null) {
+        amountString = match.group(3);
+      } else if (match.group(4) != null) {
+        amountString = match.group(4);
+        if (!amountString!.contains('.') && !amountString.contains(',')) {
+          amountString += '.00';
+        }
+      }
       if (amountString != null) {
-        amountString = amountString.replaceAll(',', '.');
+        amountString = amountString.replaceAll(',', '').replaceAll(' ', '');
         parsedAmount = double.tryParse(amountString);
-        if (parsedAmount != null) {
-          amountFound = true;
-       
-          break; // Found and parsed, stop
-        } else {
-          
+        if (parsedAmount != null && parsedAmount > 0) {
+          break;
         }
       }
     }
-
-    if (!amountFound) {
-      
-    }
-
     _amountController.text = parsedAmount?.toStringAsFixed(2) ?? '';
-   
 
-    // --- DATE PARSING DEBUGGING ---
-    DateTime? parsedDate;
-  
-
+    // --- 2. DATE PARSING ---
     if (lowerCaseText.contains('today')) {
       parsedDate = DateTime.now();
-     
     } else if (lowerCaseText.contains('yesterday')) {
       parsedDate = DateTime.now().subtract(const Duration(days: 1));
-      
     } else if (lowerCaseText.contains('tomorrow')) {
       parsedDate = DateTime.now().add(const Duration(days: 1));
-   
     } else {
       RegExp explicitDateRegex = RegExp(
-        r'(?:on|for)\s*(?:the\s*)?(\d{1,2}(?:st|nd|rd|th)?\s+(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+\d{4}|\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4})',
+        r'(?:on|for|spent\s*(?:on)?|paid\s*(?:on)?)?\s*'
+        r'(?:the\s*)?(\d{1,2}(?:st|nd|rd|th)?\s+(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)(?:\s+\d{2,4})?|' 
+        r'(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+\d{1,2}(?:st|nd|rd|th)?(?:\s+\d{2,4})?|'
+        r'\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}|'
+        r'\d{4}[\/\-\.]\d{1,2}[\/\-\.]\d{1,2})',
         caseSensitive: false,
       );
 
       var dateMatch = explicitDateRegex.firstMatch(lowerCaseText);
-      if (dateMatch != null) {
-        String? potentialDate = dateMatch.group(1);
-      
-        if (potentialDate != null) {
-          List<DateFormat> formats = [
-            DateFormat('dd MMMM yyyy'), // 01 June 2025
-            DateFormat('MMMM dd yyyy'), // June 01 2025
-            DateFormat('MM/dd/yyyy'),
-            DateFormat('dd/MM/yyyy'),
-            DateFormat('yyyy/MM/dd'),
-            DateFormat('MM-dd-yyyy'),
-            DateFormat('dd-MM-yyyy'),
-            DateFormat('yyyy-MM-dd'),
-            DateFormat('MM/dd/yy'), // For 2-digit years
-            DateFormat('dd/MM/yy'),
-          ];
+      if (dateMatch != null && dateMatch.group(1) != null) {
+        String potentialDate = dateMatch.group(1)!;
+        potentialDate = potentialDate.replaceAll(RegExp(r'(st|nd|rd|th)\b'), '');
 
-          bool dateParsedExplicitly = false;
-          for (var format in formats) {
-            try {
-              // Remove ordinal suffixes (st, nd, rd, th) before parsing
-              parsedDate = format.parseLoose(potentialDate.replaceAll(RegExp(r'(st|nd|rd|th)'), ''));
-              dateParsedExplicitly = true;
-           
-              break;
-            } catch (e) {
-              // print('    Failed to parse with ${format.pattern}: $e');
-            }
-          }
+        List<DateFormat> formats = [
+          DateFormat('dd MMMM yyyy'),
+          DateFormat('MMMM dd yyyy'),
+          DateFormat('d MMMM yyyy'),
+          DateFormat('MMMM d yyyy'),
+          DateFormat('dd MMMM yy'),
+          DateFormat('MMMM dd yy'),
+          DateFormat('d MMMM yy'),
+          DateFormat('MMMM d yy'),
+          DateFormat('MM/dd/yyyy'),
+          DateFormat('dd/MM/yyyy'),
+          DateFormat('yyyy/MM/dd'),
+          DateFormat('MM-dd-yyyy'),
+          DateFormat('dd-MM-yyyy'),
+          DateFormat('yyyy-MM-dd'),
+          DateFormat('MM/dd/yy'),
+          DateFormat('dd/MM/yy'),
+        ];
 
-          if (!dateParsedExplicitly) {
-          
-          }
+        for (var format in formats) {
+          try {
+            parsedDate = format.parseLoose(potentialDate);
+            break;
+          // ignore: empty_catches
+          } catch (e) {}
         }
-      } else {
-       
       }
     }
 
-    // If no date is found, use the current date
     parsedDate ??= DateTime.now();
     _dateController.text = DateFormat('yyyy-MM-dd').format(parsedDate);
-    
 
-    // --- DESCRIPTION PARSING DEBUGGING ---
-    String description = voiceText;
-  
+    // --- 3. TITLE PARSING ---
+    String tempTitle = voiceText;
 
-    // Remove identified amount from description
     if (parsedAmount != null) {
-      // Create a regex to match the parsed amount in various forms (e.g., "500", "500 rupees", "rs 500")
-      String amountPattern = parsedAmount.toStringAsFixed(2).replaceAll('.', r'\.');
+      String amountPattern = parsedAmount.toStringAsFixed(parsedAmount.truncateToDouble() == parsedAmount ? 0 : 2).replaceAll('.', r'\.');
       RegExp amountRemovalRegex = RegExp(
-        r'\b(?:rupees|rs|\$|€|£)?\s*' + amountPattern + r'\b|\b' + amountPattern + r'\s*(?:rupees|rs|\$|€|£)?\b',
-        caseSensitive: false,
-      );
-      description = description.replaceAll(amountRemovalRegex, '').trim();
-     
+          r'(?:total|amount|cost|price|value|spent|paid)\s*[:\s]*[\$€£Rs]*\s*' + amountPattern + r'\b|' +
+              r'\b' + amountPattern + r'\s*(?:rupees|rs|\$|€|£)\b|' +
+              r'\b(?:rupees|rs|\$|€|£)\s*' + amountPattern + r'\b',
+          caseSensitive: false);
+      tempTitle = tempTitle.replaceAll(amountRemovalRegex, '').trim();
     }
 
-    // Remove identified date phrases from description
-    description = description.replaceAll(RegExp(r'\b(today|yesterday|tomorrow)\b', caseSensitive: false), '').trim();
-    description = description.replaceAll(RegExp(r'\b(on|for)\s*(?:the\s*)?\b', caseSensitive: false), '').trim();
+    tempTitle = tempTitle.replaceAll(RegExp(r'\b(today|yesterday|tomorrow)\b', caseSensitive: false), '').trim();
 
-    // Remove month-date-year combinations (e.g., June 1st 2025 or 1st June 2025)
-    description = description.replaceAll(
-      RegExp(r'\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+\d{1,2}(?:st|nd|rd|th)?(?:\s+\d{4})?\b', caseSensitive: false),
+    tempTitle = tempTitle.replaceAll(
+      RegExp(
+        r'(?:on|for|spent\s*(?:on)?|paid\s*(?:on)?)?\s*'
+        r'(?:the\s*)?\d{1,2}(?:st|nd|rd|th)?\s+(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)(?:\s+\d{2,4})?|'
+        r'(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+\d{1,2}(?:st|nd|rd|th)?(?:\s+\d{2,4})?|'
+        r'\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}|'
+        r'\d{4}[\/\-\.]\d{1,2}[\/\-\.]\d{1,2}',
+        caseSensitive: false,
+      ),
       ''
     ).trim();
-    description = description.replaceAll(
-      RegExp(r'\b\d{1,2}(?:st|nd|rd|th)?\s+(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)(?:\s+\d{4})?\b', caseSensitive: false),
-      ''
-    ).trim();
 
-    // Remove date formats like 01/06/2025, 2025-06-01 etc.
-    description = description.replaceAll(RegExp(r'\b\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}\b'), '').trim();
-    description = description.replaceAll(RegExp(r'\b\d{4}[\/\-\.]\d{1,2}[\/\-\.]\d{1,2}\b'), '').trim();
+    List<String> fillerWords = [
+      'i spent', 'i paid', 'i bought', 'an expense of', 'it was', 'for', 'on',
+      'that was', 'which was', 'about', 'a new', 'some', 'the', 'my', 'her', 'his',
+      'our', 'their'
+    ];
+    for (String filler in fillerWords) {
+      tempTitle = tempTitle.replaceAll(RegExp(r'\b' + filler + r'\b', caseSensitive: false), '').trim();
+    }
 
-    // Remove extra spaces and punctuation left behind by removals
-    description = description.replaceAll(RegExp(r'\s+'), ' ').replaceAll(RegExp(r'^[,\. ]+|[,\. ]+$'), '').trim();
+    tempTitle = tempTitle.replaceAll(RegExp(r'\s+'), ' ').replaceAll(RegExp(r'^[,\. ]+|[,\. ]+$'), '').trim();
 
-    _descriptionController.text = description;
-    
+    parsedTitle = tempTitle.isNotEmpty ? tempTitle : 'Uncategorized Expense';
+    _titleController.text = parsedTitle;
+
+    setState(() {});
+  }
+
+  Future<void> _saveExpenseData() async {
+    User? currentUser = _auth.currentUser;
+
+    if (currentUser == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please log in to save expense data.')),
+      );
+      return;
+    }
+
+    final String dateString = _dateController.text;
+    final double? amount = double.tryParse(_amountController.text);
+    final String title = _titleController.text.trim();
+
+    if (dateString.isEmpty || amount == null || title.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please ensure amount, date, and title are entered correctly.')),
+      );
+      return;
+    }
+
+    DateTime? expenseDate;
+    try {
+      expenseDate = DateFormat('yyyy-MM-dd').parse(dateString);
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Invalid date format. Please use YYYY-MM-DD.')),
+      );
+      return;
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Saving expense...')),
+    );
+
+    try {
+      await _firestore
+          .collection('users')
+          .doc(currentUser.uid)
+          .collection('expenses')
+          .add({
+        'title': title,
+        'amount': amount,
+        'date': Timestamp.fromDate(expenseDate),
+        'timestamp': FieldValue.serverTimestamp(),
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Expense saved successfully!')),
+      );
+
+      setState(() {
+        _lastWords = '';
+        _dateController.clear();
+        _amountController.clear();
+        _titleController.clear();
+      });
+
+      // Do NOT pop the page automatically after saving
+
+    } catch (e) {
+      debugPrint('Error saving expense data to Firestore: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to save expense data: ${e.toString()}')),
+      );
+    }
   }
 
   @override
@@ -347,26 +405,82 @@ class _VoiceAddPageState extends State<VoiceAddPage> with WidgetsBindingObserver
     return Scaffold(
       appBar: AppBar(
         title: const Text('Add Expense by Voice'),
-        actions: [
-          IconButton(
-            icon: Icon(Icons.mic, color: _isListening ? Colors.red : null),
-            onPressed: _isListening ? _stopListening : _startListening,
-            tooltip: _isListening ? 'Stop Listening' : 'Start Voice Input',
-          ),
-        ],
       ),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(
           children: [
+            Expanded(
+              child: Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    GestureDetector(
+                      onTap: _isListening ? _stopListening : _startListening,
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 300),
+                        padding: const EdgeInsets.all(20),
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: _isListening ? Colors.redAccent.withOpacity(0.8) : Colors.blueAccent.withOpacity(0.8),
+                          boxShadow: [
+                            BoxShadow(
+                              color: _isListening ? Colors.redAccent.withOpacity(0.4) : Colors.blueAccent.withOpacity(0.4),
+                              blurRadius: _isListening ? 20.0 : 10.0,
+                              spreadRadius: _isListening ? 5.0 : 2.0,
+                            ),
+                          ],
+                        ),
+                        child: Icon(
+                          _isListening ? Icons.mic : Icons.mic_none,
+                          color: Colors.white,
+                          size: 80,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    Text(
+                      _speechEnabled
+                          ? (_isListening ? 'Listening... Tap to stop' : 'Tap mic to speak expense')
+                          : 'Speech not available',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: _speechEnabled ? Colors.black87 : Colors.red,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                    if (_isListening && _lastWords.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.all(8.0),
+                        child: Text(
+                          _lastWords,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(fontSize: 16, fontStyle: FontStyle.italic, color: Colors.grey),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            const Divider(height: 40),
             TextField(
               controller: _amountController,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              decoration: const InputDecoration(labelText: 'Amount'),
+              decoration: const InputDecoration(
+                labelText: 'Amount (PKR)',
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.money),
+              ),
             ),
+            const SizedBox(height: 12),
             TextField(
               controller: _dateController,
-              decoration: const InputDecoration(labelText: 'Date (YYYY-MM-DD)'),
+              decoration: const InputDecoration(
+                labelText: 'Date (YYYY-MM-DD)',
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.calendar_today),
+              ),
               readOnly: true,
               onTap: () async {
                 DateTime? picked = await showDatePicker(
@@ -382,20 +496,27 @@ class _VoiceAddPageState extends State<VoiceAddPage> with WidgetsBindingObserver
                 }
               },
             ),
+            const SizedBox(height: 12),
             TextField(
-              controller: _descriptionController,
-              decoration: const InputDecoration(labelText: 'Description'),
+              controller: _titleController,
+              decoration: const InputDecoration(
+                labelText: 'Expense Title/Category',
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.description),
+              ),
               maxLines: 2,
             ),
             const SizedBox(height: 24),
-            ElevatedButton(
-              child: const Text('Save Expense'),
-              onPressed: () {
-                // Add your save logic here
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Expense saved!')),
-                );
-              },
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: _saveExpenseData,
+                icon: const Icon(Icons.save),
+                label: const Text('Save Expense', style: TextStyle(fontSize: 18)),
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 15),
+                ),
+              ),
             ),
           ],
         ),
